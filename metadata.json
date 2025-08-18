@@ -1,0 +1,5 @@
+{
+  "name": "AI Bookmark Manager",
+  "description": "An intelligent bookmark manager that uses the Gemini API to automatically analyze URLs, fetch metadata, and suggest tags. It features full CRUD functionality, advanced search, infinite scrolling, and a sleek, dark-themed interface with data persisted in local storage.",
+  "requestFramePermissions": []
+}
