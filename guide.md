@@ -1,3 +1,4 @@
+
 # Backend Setup Guide for AI Bookmark Manager
 
 ## Why You Need a Backend
@@ -13,6 +14,8 @@ We will use a simple and popular stack that's easy for JavaScript developers to 
 *   **Node.js:** A JavaScript runtime to run our server.
 *   **Express.js:** A minimal and flexible Node.js web application framework.
 *   **`@google/genai`:** The same Gemini SDK we use on the frontend.
+*   **`axios`:** To fetch the content of web pages.
+*   **`cheerio`:** To parse HTML and extract data, much like jQuery.
 *   **`cors`:** To allow our frontend application to make requests to our backend.
 *   **`dotenv`:** To manage environment variables like our API key.
 
@@ -40,7 +43,7 @@ npm init -y
 Now, let's install the necessary packages.
 
 ```bash
-npm install express @google/genai cors dotenv
+npm install express @google/genai cors dotenv axios cheerio
 ```
 
 ### 4. Create Server File and Environment Variables
@@ -72,7 +75,7 @@ PORT=3001
 
 ### 6. Write the Server Code
 
-Open `server.js` and paste the following code. This code sets up an Express server with one endpoint: `/api/analyze-url`.
+Open `server.js` and paste the following code. This code sets up an Express server with one endpoint: `/api/analyze-url`. This improved version includes robust validation and error handling to ensure URLs are both well-formed and reachable before analysis.
 
 **server.js**
 ```javascript
@@ -80,7 +83,9 @@ Open `server.js` and paste the following code. This code sets up an Express serv
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { GoogleGenAI } = require("@google/genai");
+const axios = require('axios');
+const cheerio = require('cheerio');
+const { GoogleGenAI, Type } = require("@google/genai");
 
 // --- Configuration ---
 const app = express();
@@ -97,6 +102,18 @@ const ai = new GoogleGenAI({ apiKey: API_KEY });
 app.use(cors()); // Allow requests from our frontend
 app.use(express.json()); // Allow the server to parse JSON request bodies
 
+// --- Helper Functions ---
+const toAbsoluteUrl = (baseUrl, relativeUrl) => {
+    if (!relativeUrl || relativeUrl.startsWith('http') || relativeUrl.startsWith('//')) {
+        return relativeUrl.startsWith('//') ? `https:${relativeUrl}` : relativeUrl;
+    }
+    try {
+        return new URL(relativeUrl, baseUrl).href;
+    } catch (e) {
+        return null; // Ignore invalid URLs
+    }
+};
+
 // --- API Routes ---
 app.post('/api/analyze-url', async (req, res) => {
     const { url } = req.body;
@@ -105,49 +122,131 @@ app.post('/api/analyze-url', async (req, res) => {
         return res.status(400).json({ error: 'URL is required' });
     }
 
+    // Server-side URL format validation
+    try {
+        new URL(url);
+    } catch (error) {
+        return res.status(400).json({ error: 'The provided URL format is invalid.' });
+    }
+
     console.log(`Analyzing URL: ${url}`);
 
     try {
-        const prompt = `Analyze the content of the URL: ${url}. Based on its live content, return ONLY a single JSON object with the following keys: "title", "description", "imageUrl", "tags".
-- "title": A concise and accurate title for the webpage.
-- "description": A detailed one-paragraph summary of the page's main content.
-- "imageUrl": A relevant, high-quality image URL that represents the content. If no specific image is found, use a placeholder from a service like picsum.photos.
-- "tags": An array of 4-5 relevant keywords or tags in lowercase.
-Do not include any other text, markdown formatting (like \`\`\`json), or explanations outside of the single JSON object response.`;
+        // 1. Scrape the webpage (this also acts as validation that the URL is reachable)
+        const { data: html } = await axios.get(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            },
+            timeout: 10000,
+        });
+        const $ = cheerio.load(html);
 
+        // 2. Extract and clean content
+        $('script, style, nav, footer, header, noscript, svg, aside, form, button, input').remove();
+        const contentContainer = $('article').length ? $('article') : $('main').length ? $('main') : $('body');
+        let bodyText = '';
+        contentContainer.find('h1, h2, h3, h4, p, li, pre, code').each((i, el) => {
+            bodyText += $(el).text().trim() + '\n\n';
+        });
+        if (!bodyText.trim()) bodyText = contentContainer.text();
+        bodyText = bodyText.replace(/\s\s+/g, ' ').trim();
+        const MAX_TEXT_LENGTH = 8000;
+        const truncatedText = bodyText.substring(0, MAX_TEXT_LENGTH);
+
+        // 3. Extract potential image URLs
+        const imageUrls = new Set();
+        const addUrl = (u) => {
+            const absolute = toAbsoluteUrl(url, u);
+            if (absolute) imageUrls.add(absolute);
+        };
+        addUrl($('meta[property="og:image"]').attr('content'));
+        addUrl($('meta[name="twitter:image"]').attr('content'));
+        $('img').each((i, el) => {
+            const src = $(el).attr('src');
+            if (src && !src.startsWith('data:')) addUrl(src);
+        });
+        const uniqueImageUrls = [...imageUrls].filter(Boolean).slice(0, 20);
+
+        // 4. Construct the prompt for Gemini
+        const prompt = `
+            Analyze the following text content from the webpage at ${url}.
+            Also, consider the list of image URLs found on the page.
+            Webpage Text (truncated):
+            ---
+            ${truncatedText || 'No text content could be extracted.'}
+            ---
+            Image URLs found on the page (in order of probable relevance):
+            ---
+            ${uniqueImageUrls.length > 0 ? uniqueImageUrls.join('\n') : 'No images found.'}
+            ---
+            Based on the provided text and image URLs, generate a single JSON object with:
+            1. "title": A concise and accurate title.
+            2. "description": A detailed, one-paragraph summary.
+            3. "tags": An array of 4-5 relevant keywords, all in lowercase.
+            4. "imageUrl": The single best URL from the list that represents the page. If none are suitable, return an empty string.
+        `;
+
+        // 5. Define the expected JSON schema
+        const schema = {
+            type: Type.OBJECT,
+            properties: {
+                title: { type: Type.STRING },
+                description: { type: Type.STRING },
+                imageUrl: { type: Type.STRING },
+                tags: { type: Type.ARRAY, items: { type: Type.STRING } }
+            },
+            required: ['title', 'description', 'imageUrl', 'tags']
+        };
+
+        // 6. Call the Gemini API
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
             contents: prompt,
-            config: {
-                tools: [{ googleSearch: {} }],
-            },
+            config: { responseMimeType: "application/json", responseSchema: schema },
         });
 
-        const textResponse = response.text.trim();
-        const jsonString = textResponse.replace(/^```(json)?\s*/, '').replace(/```\s*$/, '');
-        
-        const parsed = JSON.parse(jsonString);
-
-        if (!parsed.title || !parsed.description || !parsed.tags) {
-            throw new Error("Invalid data structure from API");
+        // 7. Safely parse and send the final response
+        let parsed;
+        try {
+            parsed = JSON.parse(response.text);
+        } catch(e) {
+            console.error("Failed to parse Gemini JSON response:", response.text);
+            throw new Error("Received invalid JSON from AI model.");
         }
         
         const result = {
             url,
             title: parsed.title,
             description: parsed.description,
-            imageUrl: parsed.imageUrl || `https://picsum.photos/seed/${encodeURIComponent(url)}/600/400`,
+            imageUrl: parsed.imageUrl || (uniqueImageUrls.length > 0 ? uniqueImageUrls[0] : `https://picsum.photos/seed/${encodeURIComponent(url)}/600/400`),
             tags: parsed.tags,
         };
         
         res.json(result);
 
     } catch (error) {
-        console.error("Error analyzing URL with Gemini API:", error);
-        res.status(500).json({
-            error: "Failed to analyze URL.",
-            details: error.message
-        });
+        console.error(`Error analyzing URL: ${url}`, error.message);
+        
+        let errorMessage = "An unknown error occurred while analyzing the URL.";
+        let statusCode = 500; // Internal Server Error by default
+
+        if (error.response) {
+            // The request was made, but the server responded with an error (e.g., 404, 403)
+            statusCode = 400;
+            errorMessage = `Could not access this URL. The server responded with status: ${error.response.status}. The page may be private or no longer exist.`;
+        } else if (error.request) {
+            // The request was made, but no response was received (e.g., invalid domain, network error)
+            statusCode = 400;
+            errorMessage = `This URL could not be reached. Please check if the domain is correct and the site is online.`;
+        } else if (error.message.includes("Received invalid JSON from AI model")) {
+            // Specific error from our own logic
+            statusCode = 500;
+            errorMessage = "The AI model returned an unexpected response. Please try again."
+        }
+        
+        console.log(`Responding with status ${statusCode} and message: ${errorMessage}`);
+        res.status(statusCode).json({ error: errorMessage });
     }
 });
 
@@ -169,10 +268,4 @@ You should see the message: `Server is running on http://localhost:3001`. Your b
 
 ## Frontend Integration
 
-The `services/geminiService.ts` file in your frontend has been updated with comments and a new block of code. To switch to using this new backend:
-
-1.  Find the section marked for backend integration.
-2.  **Comment out** the entire original `analyzeUrl` function that calls the Gemini API directly from the frontend.
-3.  **Uncomment** the new `analyzeUrl` function that uses `fetch` to call your backend at `http://localhost:3001/api/analyze-url`.
-
-Your frontend will now securely communicate with your backend, and your API key will be safe.
+The `services/geminiService.ts` file in your frontend is already configured to communicate with this backend server. As long as your backend is running, the app will now use this new, more powerful analysis engine to provide significantly more accurate bookmark details.

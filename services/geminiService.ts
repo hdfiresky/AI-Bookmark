@@ -1,89 +1,98 @@
-import { GoogleGenAI } from "@google/genai";
 import { Bookmark } from '../types';
+import { GoogleGenAI, Type } from "@google/genai";
 
-if (!process.env.API_KEY) {
-    console.warn("API_KEY environment variable not set. Using a mock service.");
-}
-
-const ai = process.env.API_KEY ? new GoogleGenAI({ apiKey: process.env.API_KEY }) : null;
+// This function determines if the app should use the mock service.
+// It returns true if the API_KEY is not set, indicating a local development environment without a backend.
+const shouldUseMock = !process.env.API_KEY;
 
 const MOCK_DELAY = 1500;
-const createMockResponse = (url: string): Omit<Bookmark, 'id' | 'createdAt' | 'notes' | 'imageUrl'> & { imageUrl: string } => ({
+const createMockResponse = (url: string): Omit<Bookmark, 'id' | 'createdAt' | 'notes'> => ({
     url,
     title: `Mock Title for ${url}`,
-    description: "This is a mock description generated because the Gemini API key is not available. The AI would normally generate a detailed summary of the page content here.",
+    description: "This is a mock description generated because the Gemini API key is not available, which means the backend is not running. The AI would normally generate a detailed summary here.",
     imageUrl: `https://picsum.photos/seed/${Date.now()}/600/400`,
     tags: ['mock', 'sample-data', 'placeholder'],
 });
 
 
-// --- BACKEND INTEGRATION: The following code calls the Gemini API directly from the frontend. ---
-// --- This is not secure for production. For backend integration, comment out this entire function... ---
 export const analyzeUrl = async (url: string): Promise<Omit<Bookmark, 'id' | 'createdAt' | 'notes'>> => {
-    if (!ai) {
+    // Use the mock service if the API_KEY is not available (i.e., no backend is expected to be running).
+    if (shouldUseMock) {
+        console.warn("API_KEY environment variable not set. Using a mock service. Please run the backend for full functionality or set API_KEY in project metadata.");
         return new Promise(resolve => setTimeout(() => resolve(createMockResponse(url)), MOCK_DELAY));
     }
 
+    // =================================================================================
+    // --- Frontend-Only Gemini API Implementation (INSECURE - for development) ---
+    // This section calls the Gemini API directly from the browser.
+    // WARNING: This is insecure and should NOT be used in production as it exposes your API key.
+    // =================================================================================
     try {
-        const prompt = `Analyze the content of the URL: ${url}. Based on its live content, return ONLY a single JSON object with the following keys: "title", "description", "imageUrl", "tags".
-- "title": A concise and accurate title for the webpage.
-- "description": A detailed one-paragraph summary of the page's main content.
-- "imageUrl": A relevant, high-quality image URL that represents the content. If no specific image is found, use a placeholder from a service like picsum.photos.
-- "tags": An array of 4-5 relevant keywords or tags in lowercase.
-Do not include any other text, markdown formatting (like \`\`\`json), or explanations outside of the single JSON object response.`;
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+
+        const schema = {
+            type: Type.OBJECT,
+            properties: {
+                title: { type: Type.STRING },
+                description: { type: Type.STRING },
+                imageUrl: { type: Type.STRING },
+                tags: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING }
+                }
+            },
+            required: ['title', 'description', 'imageUrl', 'tags']
+        };
+        
+        const prompt = `
+            You are an expert bookmarking assistant. Based on the URL "${url}", infer the content and generate a suitable title, a one-paragraph description, and 4-5 relevant tags.
+            For the image, create a placeholder URL using a service like picsum.photos, like this: \`https://picsum.photos/seed/example/600/400\`. Replace 'example' with a relevant keyword from the URL.
+        `;
 
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
             contents: prompt,
             config: {
-                tools: [{ googleSearch: {} }],
+                responseMimeType: "application/json",
+                responseSchema: schema,
             },
         });
 
-        // The response text can sometimes be wrapped in markdown, so we clean it.
-        const textResponse = response.text.trim();
-        const jsonString = textResponse.replace(/^```(json)?\s*/, '').replace(/```\s*$/, '');
-        
-        const parsed = JSON.parse(jsonString);
-
-        if (!parsed.title || !parsed.description || !parsed.tags) {
-            throw new Error("Invalid data structure from API");
+        let parsed;
+        try {
+            parsed = JSON.parse(response.text);
+        } catch (e) {
+            console.error("Failed to parse Gemini JSON response (frontend):", response.text);
+            throw new Error("Received invalid JSON from AI model.");
         }
-        
+
         return {
             url,
             title: parsed.title,
             description: parsed.description,
-            imageUrl: parsed.imageUrl || `https://picsum.photos/seed/${encodeURIComponent(url)}/600/400`,
+            imageUrl: parsed.imageUrl,
             tags: parsed.tags,
         };
 
     } catch (error) {
-        console.error("Error analyzing URL with Gemini API:", error);
-        // Fallback to a structured error response
+        console.error("Error calling Gemini API from frontend:", error);
         return {
             url,
             title: `Error analyzing: ${url}`,
-            description: "Could not fetch metadata. The URL may be inaccessible or the API may have encountered an error.",
+            description: "Could not fetch metadata from Gemini API. Check your API key and network connection.",
             imageUrl: `https://picsum.photos/seed/error/600/400`,
-            tags: ["error"],
+            tags: ["error", "frontend-api"],
         };
     }
-};
-// --- ...and uncomment the function below. ---
-
-/*
-// --- START: BACKEND INTEGRATION CODE ---
-// This version of analyzeUrl communicates with your secure backend instead of the Gemini API directly.
-const BACKEND_API_URL = 'http://localhost:3001/api/analyze-url';
-
-export const analyzeUrl = async (url: string): Promise<Omit<Bookmark, 'id' | 'createdAt' | 'notes'>> => {
-    // If you want to keep the mock functionality for frontend dev without a running backend, you can add this check.
-    if (!process.env.API_KEY) {
-        console.warn("API_KEY not found. Using mock service for backend integration path.");
-        return new Promise(resolve => setTimeout(() => resolve(createMockResponse(url)), MOCK_DELAY));
-    }
-
+    
+    /*
+    // =================================================================================
+    // --- Backend Integration (SECURE - for production) ---
+    // This version communicates with your secure backend instead of the Gemini API directly.
+    // See the guide.md file for instructions on setting up the backend server.
+    // To enable this, comment out the "Frontend-Only" section above and uncomment this one.
+    // =================================================================================
+    const BACKEND_API_URL = 'http://localhost:3001/api/analyze-url';
     try {
         const response = await fetch(BACKEND_API_URL, {
             method: 'POST',
@@ -94,7 +103,7 @@ export const analyzeUrl = async (url: string): Promise<Omit<Bookmark, 'id' | 'cr
         });
 
         if (!response.ok) {
-            const errorData = await response.json();
+            const errorData = await response.json().catch(() => ({ error: `Request failed with status ${response.status}` }));
             throw new Error(errorData.error || `Request failed with status ${response.status}`);
         }
 
@@ -111,6 +120,5 @@ export const analyzeUrl = async (url: string): Promise<Omit<Bookmark, 'id' | 'cr
             tags: ["error", "backend"],
         };
     }
+    */
 };
-// --- END: BACKEND INTEGRATION CODE ---
-*/

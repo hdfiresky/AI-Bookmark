@@ -15,22 +15,17 @@ const AddBookmarkForm: React.FC<AddBookmarkFormProps> = ({ onAddBookmark }) => {
   const urlInputRef = useRef<HTMLInputElement>(null);
 
   const handleFocus = async () => {
-    // If there's already text in the input, do nothing on focus.
     if (url.trim()) return;
 
     try {
         const text = await navigator.clipboard.readText();
-        // Basic check to see if clipboard content is a URL-like string
-        // This avoids pasting large blocks of text. A simple check is sufficient.
         if (text.startsWith('http') || (text.includes('.') && !text.includes(' '))) {
             setUrl(text);
-            // Select the text to allow easy replacement by typing
             setTimeout(() => {
                 urlInputRef.current?.select();
             }, 0);
         }
     } catch (err) {
-        // This is a progressive enhancement, so we don't need to show an error.
         console.warn('Failed to read clipboard contents: ', err);
     }
   };
@@ -39,9 +34,19 @@ const AddBookmarkForm: React.FC<AddBookmarkFormProps> = ({ onAddBookmark }) => {
     e.preventDefault();
     if (!url.trim()) return;
 
-    let validUrl = url;
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        validUrl = `https://${url}`;
+    // 1. Frontend URL validation for instant feedback
+    // This regex is permissive but ensures a basic structure like "domain.com"
+    const urlPattern = /^(?:https?:\/\/)?(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*)$/;
+    const trimmedUrl = url.trim();
+
+    if (!urlPattern.test(trimmedUrl)) {
+        setError("Please enter a valid URL (e.g., google.com).");
+        return;
+    }
+
+    let validUrl = trimmedUrl;
+    if (!validUrl.startsWith('http://') && !validUrl.startsWith('https://')) {
+        validUrl = `https://${validUrl}`;
     }
 
     setIsLoading(true);
@@ -50,13 +55,15 @@ const AddBookmarkForm: React.FC<AddBookmarkFormProps> = ({ onAddBookmark }) => {
       const analysis = await analyzeUrl(validUrl);
       const newBookmark: Bookmark = {
         ...analysis,
+        url: validUrl, // Explicitly set the normalized URL to ensure data consistency
         id: new Date().toISOString() + Math.random(),
         createdAt: new Date().toISOString(),
       };
       onAddBookmark(newBookmark);
       setUrl('');
-    } catch (err) {
-      setError('Failed to analyze URL. Please try again.');
+    } catch (err: any) {
+      // The error message from the backend will now be more specific
+      setError(err.message || 'Failed to analyze URL. Please try again.');
       console.error(err);
     } finally {
       setIsLoading(false);
@@ -74,11 +81,20 @@ const AddBookmarkForm: React.FC<AddBookmarkFormProps> = ({ onAddBookmark }) => {
                 ref={urlInputRef}
                 type="text"
                 value={url}
-                onChange={(e) => setUrl(e.target.value)}
+                onChange={(e) => {
+                    setUrl(e.target.value);
+                    if (error) setError(null); // Clear error on new input
+                }}
                 onFocus={handleFocus}
                 placeholder="Enter or paste a URL to add bookmark..."
-                className="w-full pl-10 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 outline-none transition-colors"
+                className={`w-full pl-10 pr-4 py-3 bg-gray-800 border rounded-lg focus:ring-2 outline-none transition-colors ${
+                    error 
+                        ? 'border-red-500 focus:ring-red-500/50 focus:border-red-500' 
+                        : 'border-gray-700 focus:ring-cyan-500 focus:border-cyan-500'
+                }`}
                 disabled={isLoading}
+                aria-invalid={!!error}
+                aria-describedby={error ? 'url-error' : undefined}
             />
         </div>
         <button
@@ -99,7 +115,7 @@ const AddBookmarkForm: React.FC<AddBookmarkFormProps> = ({ onAddBookmark }) => {
           )}
         </button>
       </form>
-      {error && <p className="text-red-400 mt-2 text-center md:text-left">{error}</p>}
+      {error && <p id="url-error" className="text-red-400 mt-2 text-center md:text-left">{error}</p>}
     </div>
   );
 };
