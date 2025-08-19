@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { SearchFilters } from '../types';
 import Icon from './Icon';
@@ -7,7 +8,7 @@ interface HeaderProps {
   setSearchTerm: (term: string) => void;
   searchFilters: SearchFilters;
   setSearchFilters: (filters: SearchFilters) => void;
-  onLogout: () => void;
+  onLogout?: () => void;
 }
 
 const FilterCheckbox: React.FC<{ label: string; checked: boolean; onChange: (checked: boolean) => void }> = ({ label, checked, onChange }) => (
@@ -79,14 +80,18 @@ const Header: React.FC<HeaderProps> = ({ searchTerm, setSearchTerm, searchFilter
                         </div>
                     )}
                 </div>
-                 <div className="h-6 w-px bg-gray-700"></div>
-                <button
-                    onClick={onLogout}
-                    className="flex items-center gap-2 px-4 py-2 text-gray-400 hover:text-white transition-colors"
-                    aria-label="Logout"
-                >
-                    <Icon name="logout" className="w-5 h-5" />
-                </button>
+                {onLogout && (
+                    <>
+                        <div className="h-6 w-px bg-gray-700"></div>
+                        <button
+                            onClick={onLogout}
+                            className="flex items-center gap-2 px-4 py-2 text-gray-400 hover:text-white transition-colors"
+                            aria-label="Logout"
+                        >
+                            <Icon name="logout" className="w-5 h-5" />
+                        </button>
+                    </>
+                )}
             </div>
         </header>
     );

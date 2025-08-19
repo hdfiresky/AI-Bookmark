@@ -11,13 +11,26 @@ import ConfirmationModal from './components/ConfirmationModal';
 import InAppBrowser from './components/InAppBrowser';
 import AuthPage from './components/AuthPage';
 import * as api from './services/api';
+import { analyzeUrl } from './services/geminiService'; // Required for 'local' mode
+
+// --- App Mode Configuration ---
+// Set to 'backend' to use the full authentication and persistent database features.
+// Set to 'local' to use the app in a single-user mode with data stored in the browser's local storage.
+// This allows the app to be fully functional without running the backend server.
+const APP_MODE: 'backend' | 'local' = 'local';
 
 const ITEMS_PER_PAGE = 12;
 
 export default function App(): React.ReactNode {
+  // --- State for local mode (uses browser's local storage) ---
+  const [localBookmarks, setLocalBookmarks] = useLocalStorage<Bookmark[]>('bookmarks', []);
+
+  // --- State for backend mode ---
+  const [serverBookmarks, setServerBookmarks] = useState<Bookmark[]>([]);
   const [token, setToken] = useLocalStorage<string | null>('authToken', null);
-  const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
-  const [appState, setAppState] = useState<'loading' | 'ready' | 'error'>('loading');
+  
+  // --- Shared State ---
+  const [appState, setAppState] = useState<'loading' | 'ready' | 'error'>(APP_MODE === 'backend' ? 'loading' : 'ready');
   const [error, setError] = useState<string | null>(null);
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -38,12 +51,16 @@ export default function App(): React.ReactNode {
   
   const debouncedSearchTerm = useDebounce(searchTerm, 300);
 
+  // --- Data Source ---
+  const bookmarks = APP_MODE === 'local' ? localBookmarks : serverBookmarks;
+
+  // --- Backend-specific logic for fetching initial data ---
   const fetchBookmarks = useCallback(async () => {
     if (!token) return;
     setAppState('loading');
     try {
       const fetchedBookmarks = await api.getBookmarks(token);
-      setBookmarks(fetchedBookmarks);
+      setServerBookmarks(fetchedBookmarks);
       setAppState('ready');
     } catch (err: any) {
       console.error("Failed to fetch bookmarks:", err);
@@ -53,14 +70,16 @@ export default function App(): React.ReactNode {
   }, [token]);
 
   useEffect(() => {
-    if (token) {
-      fetchBookmarks();
-    } else {
-      setAppState('ready');
+    if (APP_MODE === 'backend') {
+      if (token) {
+        fetchBookmarks();
+      } else {
+        setAppState('ready'); // Ready to show login page
+      }
     }
   }, [token, fetchBookmarks]);
 
-  // Effect to lock body scroll when any modal is open
+  // --- Effect to lock body scroll when any modal is open ---
   useEffect(() => {
     if (browsingUrl || editingBookmark || deletingBookmark) {
       document.body.style.overflow = 'hidden';
@@ -72,6 +91,7 @@ export default function App(): React.ReactNode {
     };
   }, [browsingUrl, editingBookmark, deletingBookmark]);
 
+  // --- Filtering and Infinite Scroll Logic (common for both modes) ---
   const filteredBookmarks = useMemo(() => {
     if (!debouncedSearchTerm) return bookmarks;
     const lowercasedTerm = debouncedSearchTerm.toLowerCase();
@@ -101,25 +121,45 @@ export default function App(): React.ReactNode {
     if (node) observer.current.observe(node);
   }, [filteredBookmarks.length, visibleCount]);
 
+  // --- Mode-dependent CRUD Operations ---
   const addBookmark = useCallback(async (url: string) => {
-    if (!token) throw new Error("Authentication required.");
-    const newBookmark = await api.createBookmark(url, token);
-    setBookmarks(prev => [newBookmark, ...prev]);
-  }, [token]);
+    if (APP_MODE === 'backend') {
+      if (!token) throw new Error("Authentication required.");
+      const newBookmark = await api.createBookmark(url, token);
+      setServerBookmarks(prev => [newBookmark, ...prev]);
+    } else {
+      const analysis = await analyzeUrl(url);
+      const newBookmark: Bookmark = {
+        ...analysis,
+        id: new Date().toISOString() + Math.random().toString(36).substr(2, 9),
+        notes: '',
+        createdAt: new Date().toISOString(),
+      };
+      setLocalBookmarks(prev => [newBookmark, ...prev]);
+    }
+  }, [token, setServerBookmarks, setLocalBookmarks]);
 
   const updateBookmark = useCallback(async (updatedBookmark: Bookmark) => {
-    if (!token) throw new Error("Authentication required.");
-    const savedBookmark = await api.updateBookmark(updatedBookmark, token);
-    setBookmarks(prev => prev.map(b => b.id === savedBookmark.id ? savedBookmark : b));
+    if (APP_MODE === 'backend') {
+      if (!token) throw new Error("Authentication required.");
+      const savedBookmark = await api.updateBookmark(updatedBookmark, token);
+      setServerBookmarks(prev => prev.map(b => b.id === savedBookmark.id ? savedBookmark : b));
+    } else {
+      setLocalBookmarks(prev => prev.map(b => b.id === updatedBookmark.id ? updatedBookmark : b));
+    }
     setEditingBookmark(null);
-  }, [token]);
+  }, [token, setServerBookmarks, setLocalBookmarks]);
 
   const deleteBookmark = useCallback(async (id: string) => {
-    if (!token) throw new Error("Authentication required.");
-    await api.deleteBookmark(id, token);
-    setBookmarks(prev => prev.filter(b => b.id !== id));
+    if (APP_MODE === 'backend') {
+      if (!token) throw new Error("Authentication required.");
+      await api.deleteBookmark(id, token);
+      setServerBookmarks(prev => prev.filter(b => b.id !== id));
+    } else {
+      setLocalBookmarks(prev => prev.filter(b => b.id !== id));
+    }
     setDeletingBookmark(null);
-  }, [token]);
+  }, [token, setServerBookmarks, setLocalBookmarks]);
   
   const handleOpenBookmark = useCallback((bookmark: Bookmark) => {
     if (bookmark.openInIframe === false) {
@@ -129,27 +169,32 @@ export default function App(): React.ReactNode {
     }
   }, []);
 
+  // --- Auth Handlers (backend mode only) ---
   const handleLoginSuccess = (newToken: string) => {
     setToken(newToken);
   };
 
   const handleLogout = () => {
     setToken(null);
-    setBookmarks([]);
+    setServerBookmarks([]); // Clear server bookmarks on logout
   };
 
-  if (appState === 'loading' && !bookmarks.length) {
-    return (
-        <div className="min-h-screen bg-gray-950 flex justify-center items-center">
-            <div className="w-12 h-12 border-4 border-dashed rounded-full animate-spin-slow border-cyan-500"></div>
-        </div>
-    );
+  // --- Render Logic ---
+  if (APP_MODE === 'backend') {
+    if (appState === 'loading' && !serverBookmarks.length) {
+      return (
+          <div className="min-h-screen bg-gray-950 flex justify-center items-center">
+              <div className="w-12 h-12 border-4 border-dashed rounded-full animate-spin-slow border-cyan-500"></div>
+          </div>
+      );
+    }
+
+    if (!token) {
+      return <AuthPage onLoginSuccess={handleLoginSuccess} />;
+    }
   }
 
-  if (!token) {
-    return <AuthPage onLoginSuccess={handleLoginSuccess} />;
-  }
-
+  // --- Main App UI (for local mode, or for backend mode after login) ---
   return (
     <div className="min-h-screen bg-gray-950 font-sans">
       <main className="container mx-auto px-4 py-8">
@@ -158,7 +203,7 @@ export default function App(): React.ReactNode {
           setSearchTerm={setSearchTerm}
           searchFilters={searchFilters}
           setSearchFilters={setSearchFilters}
-          onLogout={handleLogout}
+          onLogout={APP_MODE === 'backend' ? handleLogout : undefined}
         />
         
         <AddBookmarkForm onAddBookmark={addBookmark} />
