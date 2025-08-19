@@ -1,4 +1,7 @@
+
 # Backend Setup Guide for AI Bookmark Manager
+
+This guide covers setting up the secure, multi-user backend for the AI Bookmark Manager.
 
 ## Why You Need a Backend
 
@@ -10,7 +13,30 @@ This backend provides:
 *   **Persistent Storage:** Bookmarks are stored in a database, so your data is safe and permanent.
 *   **Advanced URL Analysis:** The server can fetch webpage content directly, leading to much more accurate and detailed bookmark information from the AI.
 
-## Technology Stack
+## Frontend Architecture & Development Mode
+
+The frontend is now split into two main components to provide a clean separation between development and production modes:
+
+*   **`components/LocalApp.tsx`**: A self-contained version of the app that uses your browser's **Local Storage** to save bookmarks. It does **not** require the backend to be running. This is perfect for UI development or offline use.
+*   **`components/BackendApp.tsx`**: The full-featured, secure version of the app. It handles user login/registration and communicates with the backend server for all operations. This is the version you should use for production.
+
+### How to Switch Modes
+
+You can easily switch between these two modes in `App.tsx`:
+
+```typescript
+// Open src/App.tsx
+
+// Set to 'local' for frontend development (no backend needed).
+// Set to 'backend' for production or full-stack testing.
+const APP_MODE: 'backend' | 'local' = 'local'; 
+```
+
+**It is critical to set `APP_MODE` to `'backend'` before deploying your application.**
+
+---
+
+## Backend Technology Stack
 
 *   **Node.js & Express.js:** To run our server and handle API requests.
 *   **SQLite:** A simple, file-based database that requires no separate installation, making setup incredibly easy.

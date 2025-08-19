@@ -1,3 +1,4 @@
+
 import { Bookmark } from '../types';
 import { GoogleGenAI, Type } from "@google/genai";
 
@@ -74,34 +75,16 @@ const callFrontendGemini = async (url: string): Promise<Omit<Bookmark, 'id' | 'c
     }
 };
 
+/**
+ * Analyzes a URL using the insecure frontend Gemini API or a mock service.
+ * Intended for 'local' development mode only.
+ */
 export const analyzeUrl = async (url: string): Promise<Omit<Bookmark, 'id' | 'createdAt' | 'notes'>> => {
-    // 1. If API key is missing entirely, use the mock service.
     if (shouldUseMock) {
-        console.warn("API_KEY environment variable not set. Using a mock service. Please follow guide.md to set up the backend for full functionality.");
+        console.warn("API_KEY environment variable not set. Using a mock service for local development.");
         return new Promise(resolve => setTimeout(() => resolve(createMockResponse(url)), MOCK_DELAY));
     }
-
-    // 2. Prioritize using the backend service, which is more secure and powerful.
-    const BACKEND_URL = 'http://localhost:3001/api/analyze-url';
-    try {
-        console.log(`Attempting to analyze URL via backend: ${url}`);
-        const response = await fetch(BACKEND_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url }),
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            throw new Error(data.error || `Backend error: ${response.statusText}`);
-        }
-        // The backend provides the `openInIframe` property.
-        return data;
-
-    } catch (backendError: any) {
-        // 3. If the backend fails (e.g., not running), fall back to the insecure frontend Gemini call.
-        console.warn(`Backend request failed: ${backendError.message}. Falling back to insecure frontend Gemini API call.`);
-        return callFrontendGemini(url);
-    }
+    
+    // In local mode, we directly call the frontend Gemini service.
+    return callFrontendGemini(url);
 };

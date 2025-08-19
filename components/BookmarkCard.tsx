@@ -33,7 +33,7 @@ const BookmarkCard: React.FC<BookmarkCardProps> = ({ bookmark, onEdit, onDelete,
         <div onClick={onOpen} className="hover:text-cyan-400 transition-colors cursor-pointer">
           <h3 className="text-lg font-bold mb-2 line-clamp-2">{title}</h3>
         </div>
-        <p className="text-gray-400 text-sm mb-4 line-clamp-3 flex-grow">{description}</p>
+        <p className="text-gray-400 text-sm mb-4">{description}</p>
         <div className="flex flex-wrap gap-2 mb-4">
           {tags.slice(0, 4).map(tag => (
             <Tag key={tag} label={tag} />
