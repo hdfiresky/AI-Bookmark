@@ -1,4 +1,3 @@
-
 # Backend Setup Guide for AI Bookmark Manager
 
 This guide covers setting up the secure, multi-user backend for the AI Bookmark Manager.
@@ -11,7 +10,10 @@ This backend provides:
 *   **API Key Security:** Your Gemini API key is stored securely on the server and never exposed to users.
 *   **User Authentication:** A full login/registration system allows multiple users to have their own private bookmark collections.
 *   **Persistent Storage:** Bookmarks are stored in a database, so your data is safe and permanent.
-*   **Advanced URL Analysis:** The server can fetch webpage content directly, leading to much more accurate and detailed bookmark information from the AI.
+*   **Smart, Hybrid URL Analysis:** The server uses an efficient hybrid approach. It performs a multi-step scrape of the webpage:
+    1.  It prioritizes official metadata (like Open Graph `og:title` and `og:description`).
+    2.  If the meta description is missing or too short, it intelligently falls back to scraping the first few paragraphs from the page's main content (`<article>` or `<main>` sections).
+    3.  This pre-processed, high-quality information is then passed to the Gemini API for final refinement and tag generation. This method is faster, cheaper, and yields more accurate results.
 
 ## Frontend Architecture & Development Mode
 
@@ -285,11 +287,41 @@ app.post('/api/bookmarks', authenticateToken, async (req, res) => {
     if (!url) return res.status(400).json({ error: 'URL is required' });
 
     try {
-        // Step 1: Analyze URL (adapted from previous guide)
-        const axiosResponse = await axios.get(url, { timeout: 10000 });
-        const headers = axiosResponse.headers;
+        // --- Step 1: Scrape the page for high-quality metadata ---
+        const axiosResponse = await axios.get(url, { 
+            timeout: 10000,
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' } 
+        });
         const html = axiosResponse.data;
+        const $ = cheerio.load(html);
 
+        // Prioritized extraction
+        const extractedTitle = $('meta[property="og:title"]').attr('content') || $('title').text() || $('h1').first().text();
+        
+        // Advanced description extraction with fallback
+        let extractedDescription = $('meta[property="og:description"]').attr('content') || $('meta[name="description"]').attr('content') || '';
+        
+        // If meta description is too short or missing, fall back to scraping page content
+        const wordCount = extractedDescription.trim().split(/\s+/).length;
+        if (wordCount < 10) {
+            let contentText = '';
+            const mainContentEl = $('article').first().length ? $('article').first() : $('main').first();
+            if (mainContentEl.length) {
+                mainContentEl.find('p').each((i, el) => {
+                    if (contentText.length < 350) { // Gather a reasonable amount of text
+                        contentText += $(el).text().trim() + ' ';
+                    }
+                });
+            }
+            if (contentText.trim()) {
+                extractedDescription = contentText.trim();
+            }
+        }
+
+        const imageUrl = $('meta[property="og:image"]').attr('content') || `https://picsum.photos/seed/${encodeURIComponent(url)}/600/400`;
+        
+        // Check iframe compatibility
+        const headers = axiosResponse.headers;
         let openInIframe = true;
         if (headers['x-frame-options']?.toUpperCase().includes('DENY') || headers['x-frame-options']?.toUpperCase().includes('SAMEORIGIN')) {
             openInIframe = false;
@@ -298,25 +330,46 @@ app.post('/api/bookmarks', authenticateToken, async (req, res) => {
             openInIframe = false;
         }
 
-        const $ = cheerio.load(html);
-        $('script, style, nav, footer, header').remove();
-        const bodyText = ($('article').text() || $('main').text() || $('body').text()).replace(/\s\s+/g, ' ').trim().substring(0, 8000);
-        const ogImage = $('meta[property="og:image"]').attr('content');
+        // --- Step 2: Create a minimal, targeted prompt for Gemini ---
+        const prompt = `
+            You are an expert bookmarking assistant. I have extracted the following information from a webpage.
+            - URL: "${url}"
+            - Extracted Title: "${extractedTitle}"
+            - Extracted Content/Description: "${extractedDescription.substring(0, 500)}"
 
-        const prompt = `Analyze the text from the webpage at ${url}. Webpage Text: "${bodyText}". Based on this, generate a JSON object with: "title", a one-paragraph "description", and an array of 4-5 relevant lowercase "tags".`;
-        const schema = { type: Type.OBJECT, properties: { title: { type: Type.STRING }, description: { type: Type.STRING }, tags: { type: Type.ARRAY, items: { type: Type.STRING } } }, required: ['title', 'description', 'tags'] };
+            Based ONLY on this information, perform the following tasks:
+            1.  **Validate/Refine Title:** Use the "Extracted Title". If it seems incomplete, generic, or missing, create a concise, compelling title.
+            2.  **Create a Summary:** Based on the "Extracted Content/Description", write a new, neutral, one-paragraph summary.
+            3.  **Generate Tags:** Generate an array of 4-5 relevant, lowercase tags based on the content.
+
+            Return the result as a single, minified JSON object with the keys "title", "description", and "tags".
+        `;
+
+        const schema = { 
+            type: Type.OBJECT, 
+            properties: { 
+                title: { type: Type.STRING }, 
+                description: { type: Type.STRING }, 
+                tags: { type: Type.ARRAY, items: { type: Type.STRING } } 
+            }, 
+            required: ['title', 'description', 'tags'] 
+        };
         
-        const geminiResponse = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt, config: { responseMimeType: "application/json", responseSchema: schema }});
+        const geminiResponse = await ai.models.generateContent({ 
+            model: "gemini-2.5-flash", 
+            contents: prompt, 
+            config: { responseMimeType: "application/json", responseSchema: schema }
+        });
         const analysis = JSON.parse(geminiResponse.text);
 
-        // Step 2: Save to DB
+        // --- Step 3: Save the final bookmark to the database ---
         const newBookmark = {
             id: new Date().toISOString() + Math.random(),
             userId: req.user.id,
             url,
             title: analysis.title,
             description: analysis.description,
-            imageUrl: ogImage || `https://picsum.photos/seed/${encodeURIComponent(url)}/600/400`,
+            imageUrl,
             tags: JSON.stringify(analysis.tags),
             notes: '',
             createdAt: new Date().toISOString(),
@@ -332,7 +385,7 @@ app.post('/api/bookmarks', authenticateToken, async (req, res) => {
 
     } catch (error) {
         console.error(`Error processing URL ${url}:`, error.message);
-        res.status(500).json({ error: `Failed to analyze URL. It may be unreachable or block automated access.` });
+        res.status(500).json({ error: `Failed to analyze URL. The site may be unreachable or block automated access.` });
     }
 });
 

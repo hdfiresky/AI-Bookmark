@@ -8,6 +8,7 @@ export interface Bookmark {
   notes?: string;
   createdAt: string;
   openInIframe?: boolean;
+  status?: 'pending';
 }
 
 export interface SearchFilters {
@@ -16,4 +17,11 @@ export interface SearchFilters {
   url: boolean;
   tags: boolean;
   notes: boolean;
+}
+
+export type ViewMode = 'card' | 'icon';
+
+export interface LayoutSettings {
+  columns: number;
+  viewMode: ViewMode;
 }

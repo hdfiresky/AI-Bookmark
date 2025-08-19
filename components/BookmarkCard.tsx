@@ -11,6 +11,30 @@ interface BookmarkCardProps {
 }
 
 const BookmarkCard: React.FC<BookmarkCardProps> = ({ bookmark, onEdit, onDelete, onOpen }) => {
+  if (bookmark.status === 'pending') {
+    return (
+      <div className="bg-gray-850 rounded-lg shadow-lg overflow-hidden flex flex-col animate-pulse">
+        <div className="bg-gray-700 w-full h-48"></div>
+        <div className="p-4 flex flex-col flex-grow">
+          <div className="h-6 bg-gray-700 rounded w-3/4 mb-3"></div>
+          <div className="h-4 bg-gray-700 rounded w-full mb-2"></div>
+          <div className="h-4 bg-gray-700 rounded w-5/6 mb-4"></div>
+          <div className="flex flex-wrap gap-2 mb-4">
+            <div className="h-6 bg-gray-700 rounded-full w-16"></div>
+            <div className="h-6 bg-gray-700 rounded-full w-20"></div>
+          </div>
+        </div>
+        <div className="px-4 pb-4 mt-auto flex justify-between items-center text-gray-500">
+            <div className="h-4 bg-gray-700 rounded w-24"></div>
+            <div className="flex items-center gap-2">
+              <div className="w-9 h-9 bg-gray-700 rounded-full"></div>
+              <div className="w-9 h-9 bg-gray-700 rounded-full"></div>
+            </div>
+          </div>
+      </div>
+    );
+  }
+
   const { url, title, description, imageUrl, tags, createdAt } = bookmark;
   
   const formattedDate = new Date(createdAt).toLocaleDateString('en-US', {

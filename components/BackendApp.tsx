@@ -1,6 +1,5 @@
-
 import React, { useState, useCallback, useEffect } from 'react';
-import { Bookmark } from '../types';
+import { Bookmark, LayoutSettings } from '../types';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useBookmarkGrid } from '../hooks/useBookmarkGrid';
 import * as api from '../services/api';
@@ -8,9 +7,22 @@ import AuthPage from './AuthPage';
 import Header from './Header';
 import AddBookmarkForm from './AddBookmarkForm';
 import BookmarkCard from './BookmarkCard';
+import BookmarkIcon from './BookmarkIcon';
 import BookmarkModal from './BookmarkModal';
 import ConfirmationModal from './ConfirmationModal';
 import InAppBrowser from './InAppBrowser';
+
+/**
+ * Provides initial layout settings based on screen width.
+ * Defaults to 1 column for mobile and 4 for desktop.
+ */
+const getInitialLayoutSettings = (): LayoutSettings => {
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+    return {
+        columns: isMobile ? 1 : 4,
+        viewMode: 'card',
+    };
+};
 
 /**
  * BackendApp is the full-featured version of the application that
@@ -21,6 +33,7 @@ export default function BackendApp(): React.ReactNode {
   const [token, setToken] = useLocalStorage<string | null>('authToken', null);
   const [appState, setAppState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
+  const [layoutSettings, setLayoutSettings] = useLocalStorage<LayoutSettings>('layoutSettings', getInitialLayoutSettings());
 
   const {
     searchTerm,
@@ -32,13 +45,12 @@ export default function BackendApp(): React.ReactNode {
     lastBookmarkElementRef,
     visibleCount,
     debouncedSearchTerm
-  } = useBookmarkGrid(bookmarks);
+  } = useBookmarkGrid(bookmarks, layoutSettings.viewMode);
 
   const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null);
   const [deletingBookmark, setDeletingBookmark] = useState<Bookmark | null>(null);
   const [browsingUrl, setBrowsingUrl] = useState<string | null>(null);
   
-  // Fetch initial data when the token is available
   const fetchBookmarks = useCallback(async () => {
     if (!token) return;
     setAppState('loading');
@@ -57,11 +69,10 @@ export default function BackendApp(): React.ReactNode {
     if (token) {
       fetchBookmarks();
     } else {
-      setAppState('ready'); // Ready to show login page
+      setAppState('ready');
     }
   }, [token, fetchBookmarks]);
   
-  // Effect to lock body scroll when any modal is open
   useEffect(() => {
     if (browsingUrl || editingBookmark || deletingBookmark) {
       document.body.style.overflow = 'hidden';
@@ -73,11 +84,31 @@ export default function BackendApp(): React.ReactNode {
     };
   }, [browsingUrl, editingBookmark, deletingBookmark]);
 
-  // --- API-driven CRUD Operations ---
   const addBookmark = useCallback(async (url: string) => {
     if (!token) throw new Error("Authentication required.");
-    const newBookmark = await api.createBookmark(url, token);
-    setBookmarks(prev => [newBookmark, ...prev]);
+
+    const pendingId = `pending-${Date.now()}`;
+    const pendingBookmark: Bookmark = {
+        id: pendingId,
+        url: url,
+        title: "Analyzing URL...",
+        description: "The AI is summarizing this page. This card will update automatically.",
+        imageUrl: `https://picsum.photos/seed/${encodeURIComponent(url)}/600/400`,
+        tags: [],
+        createdAt: new Date().toISOString(),
+        status: 'pending',
+    };
+
+    setBookmarks(prev => [pendingBookmark, ...prev]);
+
+    try {
+        const newBookmark = await api.createBookmark(url, token);
+        setBookmarks(prev => prev.map(b => (b.id === pendingId ? newBookmark : b)));
+    } catch (error) {
+        console.error("Failed to add bookmark:", error);
+        setBookmarks(prev => prev.filter(b => b.id !== pendingId));
+        throw error;
+    }
   }, [token]);
 
   const updateBookmark = useCallback(async (updatedBookmark: Bookmark) => {
@@ -95,15 +126,14 @@ export default function BackendApp(): React.ReactNode {
   }, [token]);
   
   const handleOpenBookmark = useCallback((bookmark: Bookmark) => {
+    if (bookmark.status === 'pending') return;
     const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
-    // On non-mobile devices, always open links in a new tab for a better desktop experience.
     if (!isMobile) {
       window.open(bookmark.url, '_blank', 'noopener,noreferrer');
       return;
     }
     
-    // On mobile devices, use the in-app browser if the site allows it.
     if (bookmark.openInIframe === false) {
       window.open(bookmark.url, '_blank', 'noopener,noreferrer');
     } else {
@@ -111,17 +141,15 @@ export default function BackendApp(): React.ReactNode {
     }
   }, []);
 
-  // --- Auth Handlers ---
   const handleLoginSuccess = (newToken: string) => {
     setToken(newToken);
   };
 
   const handleLogout = () => {
     setToken(null);
-    setBookmarks([]); // Clear bookmarks on logout
+    setBookmarks([]);
   };
 
-  // --- Render Logic ---
   if (appState === 'loading' && !bookmarks.length) {
     return (
         <div className="min-h-screen bg-gray-950 flex justify-center items-center">
@@ -142,6 +170,8 @@ export default function BackendApp(): React.ReactNode {
           setSearchTerm={setSearchTerm}
           searchFilters={searchFilters}
           setSearchFilters={setSearchFilters}
+          layoutSettings={layoutSettings}
+          setLayoutSettings={setLayoutSettings}
           onLogout={handleLogout}
         />
         
@@ -150,19 +180,34 @@ export default function BackendApp(): React.ReactNode {
         {appState === 'error' && <div className="text-center mt-8 text-red-400 bg-red-900/50 p-4 rounded-lg">{error}</div>}
 
         {visibleBookmarks.length > 0 ? (
-          <div className="columns-1 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-6 mt-8">
+           <div 
+             className="gap-6 mt-8"
+             style={{
+                columnCount: layoutSettings.columns,
+                columnGap: '1.5rem',
+             }}
+          >
             {visibleBookmarks.map((bookmark, index) => (
               <div 
                 ref={index === visibleBookmarks.length - 1 ? lastBookmarkElementRef : null} 
                 key={bookmark.id}
                 className="break-inside-avoid mb-6"
               >
-                <BookmarkCard 
-                  bookmark={bookmark}
-                  onEdit={() => setEditingBookmark(bookmark)}
-                  onDelete={() => setDeletingBookmark(bookmark)}
-                  onOpen={() => handleOpenBookmark(bookmark)}
-                />
+                 {layoutSettings.viewMode === 'card' ? (
+                    <BookmarkCard 
+                      bookmark={bookmark}
+                      onEdit={() => setEditingBookmark(bookmark)}
+                      onDelete={() => setDeletingBookmark(bookmark)}
+                      onOpen={() => handleOpenBookmark(bookmark)}
+                    />
+                ) : (
+                    <BookmarkIcon
+                      bookmark={bookmark}
+                      onEdit={() => setEditingBookmark(bookmark)}
+                      onDelete={() => setDeletingBookmark(bookmark)}
+                      onOpen={() => handleOpenBookmark(bookmark)}
+                    />
+                )}
               </div>
             ))}
           </div>

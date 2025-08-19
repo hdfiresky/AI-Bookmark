@@ -1,6 +1,5 @@
-
 import React, { useState, useRef, useEffect } from 'react';
-import { SearchFilters } from '../types';
+import { SearchFilters, LayoutSettings } from '../types';
 import Icon from './Icon';
 
 interface HeaderProps {
@@ -8,6 +7,8 @@ interface HeaderProps {
   setSearchTerm: (term: string) => void;
   searchFilters: SearchFilters;
   setSearchFilters: (filters: SearchFilters) => void;
+  layoutSettings: LayoutSettings;
+  setLayoutSettings: (settings: LayoutSettings) => void;
   onLogout?: () => void;
 }
 
@@ -23,14 +24,19 @@ const FilterCheckbox: React.FC<{ label: string; checked: boolean; onChange: (che
     </label>
 );
 
-const Header: React.FC<HeaderProps> = ({ searchTerm, setSearchTerm, searchFilters, setSearchFilters, onLogout }) => {
+const Header: React.FC<HeaderProps> = ({ searchTerm, setSearchTerm, searchFilters, setSearchFilters, layoutSettings, setLayoutSettings, onLogout }) => {
     const [isFilterOpen, setIsFilterOpen] = useState(false);
+    const [isLayoutOpen, setIsLayoutOpen] = useState(false);
     const filterRef = useRef<HTMLDivElement>(null);
+    const layoutRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
             if (filterRef.current && !filterRef.current.contains(event.target as Node)) {
                 setIsFilterOpen(false);
+            }
+            if (layoutRef.current && !layoutRef.current.contains(event.target as Node)) {
+                setIsLayoutOpen(false);
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
@@ -39,6 +45,10 @@ const Header: React.FC<HeaderProps> = ({ searchTerm, setSearchTerm, searchFilter
 
     const handleFilterChange = (filter: keyof SearchFilters, value: boolean) => {
         setSearchFilters({ ...searchFilters, [filter]: value });
+    };
+
+    const handleLayoutChange = <K extends keyof LayoutSettings>(key: K, value: LayoutSettings[K]) => {
+        setLayoutSettings({ ...layoutSettings, [key]: value });
     };
 
     return (
@@ -57,6 +67,39 @@ const Header: React.FC<HeaderProps> = ({ searchTerm, setSearchTerm, searchFilter
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="flex-grow min-w-0 px-3 py-2 bg-transparent outline-none text-gray-100 placeholder-gray-400"
                 />
+                <div className="relative flex items-center" ref={layoutRef}>
+                    <div className="h-6 w-px bg-gray-700"></div>
+                    <button
+                        onClick={() => setIsLayoutOpen(!isLayoutOpen)}
+                        className="flex items-center gap-2 px-4 py-2 text-gray-400 hover:text-white transition-colors"
+                        aria-label="Toggle layout settings"
+                    >
+                        <Icon name="layout" className="w-5 h-5" />
+                        <span className="font-medium text-sm hidden sm:inline">Layout</span>
+                    </button>
+                    {isLayoutOpen && (
+                         <div className="absolute right-0 top-full mt-2 w-64 bg-gray-850 border border-gray-700 rounded-lg shadow-lg z-10 p-3 animate-fade-in">
+                            <h3 className="text-xs font-semibold text-gray-400 uppercase px-3 pt-1 pb-2">View Mode</h3>
+                            <div className="grid grid-cols-2 gap-2 p-1 bg-gray-900 rounded-md mb-3">
+                                <button onClick={() => handleLayoutChange('viewMode', 'card')} className={`px-2 py-1 text-sm font-medium rounded ${layoutSettings.viewMode === 'card' ? 'bg-cyan-600 text-white' : 'text-gray-300 hover:bg-gray-700'}`}>Card</button>
+                                <button onClick={() => handleLayoutChange('viewMode', 'icon')} className={`px-2 py-1 text-sm font-medium rounded ${layoutSettings.viewMode === 'icon' ? 'bg-cyan-600 text-white' : 'text-gray-300 hover:bg-gray-700'}`}>Icon</button>
+                            </div>
+                            
+                            <h3 className="text-xs font-semibold text-gray-400 uppercase px-3 pt-1 pb-2">Columns</h3>
+                            <div className="flex items-center gap-3 px-2">
+                                <input
+                                    type="range"
+                                    min="1"
+                                    max="8"
+                                    value={layoutSettings.columns}
+                                    onChange={(e) => handleLayoutChange('columns', parseInt(e.target.value, 10))}
+                                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                                />
+                                <span className="text-sm font-semibold text-gray-200 bg-gray-700 rounded-md w-8 h-6 text-center leading-6">{layoutSettings.columns}</span>
+                            </div>
+                        </div>
+                    )}
+                </div>
                 <div className="relative flex items-center" ref={filterRef}>
                     <div className="h-6 w-px bg-gray-700"></div>
                     <button

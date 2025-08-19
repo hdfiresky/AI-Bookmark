@@ -1,11 +1,10 @@
-
 import { useState, useMemo, useCallback, useRef } from 'react';
-import { Bookmark, SearchFilters } from '../types';
+import { Bookmark, SearchFilters, ViewMode } from '../types';
 import { useDebounce } from './useDebounce';
 
-const ITEMS_PER_PAGE = 12;
+const getItemsPerPage = (viewMode: ViewMode) => viewMode === 'icon' ? 30 : 12;
 
-export function useBookmarkGrid(bookmarks: Bookmark[]) {
+export function useBookmarkGrid(bookmarks: Bookmark[], viewMode: ViewMode) {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchFilters, setSearchFilters] = useState<SearchFilters>({
     title: true,
@@ -15,21 +14,20 @@ export function useBookmarkGrid(bookmarks: Bookmark[]) {
     notes: true,
   });
 
-  const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
+  const itemsPerPage = getItemsPerPage(viewMode);
+  const [visibleCount, setVisibleCount] = useState(itemsPerPage);
   const observer = useRef<IntersectionObserver | null>(null);
   
   const debouncedSearchTerm = useDebounce(searchTerm, 300);
 
   const filteredBookmarks = useMemo(() => {
+    // Reset visible count when search term or view mode changes
+    setVisibleCount(itemsPerPage);
+
     if (!debouncedSearchTerm) {
-        // Reset visible count when search is cleared
-        setVisibleCount(ITEMS_PER_PAGE);
         return bookmarks;
     };
     const lowercasedTerm = debouncedSearchTerm.toLowerCase();
-    
-    // Reset visible count for a new search
-    setVisibleCount(ITEMS_PER_PAGE);
 
     return bookmarks.filter((bookmark) => {
       const inTitle = searchFilters.title && bookmark.title.toLowerCase().includes(lowercasedTerm);
@@ -40,7 +38,7 @@ export function useBookmarkGrid(bookmarks: Bookmark[]) {
       
       return inTitle || inDescription || inUrl || inTags || inNotes;
     });
-  }, [bookmarks, debouncedSearchTerm, searchFilters]);
+  }, [bookmarks, debouncedSearchTerm, searchFilters, itemsPerPage]);
 
   const visibleBookmarks = useMemo(() => {
     return filteredBookmarks.slice(0, visibleCount);
@@ -50,11 +48,11 @@ export function useBookmarkGrid(bookmarks: Bookmark[]) {
     if (observer.current) observer.current.disconnect();
     observer.current = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting && visibleCount < filteredBookmarks.length) {
-        setVisibleCount(prev => prev + ITEMS_PER_PAGE);
+        setVisibleCount(prev => prev + itemsPerPage);
       }
     });
     if (node) observer.current.observe(node);
-  }, [filteredBookmarks.length, visibleCount]);
+  }, [filteredBookmarks.length, visibleCount, itemsPerPage]);
 
   return {
     searchTerm,

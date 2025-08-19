@@ -1,15 +1,27 @@
-
 import React, { useState, useCallback, useEffect } from 'react';
-import { Bookmark } from '../types';
+import { Bookmark, LayoutSettings } from '../types';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useBookmarkGrid } from '../hooks/useBookmarkGrid';
 import { analyzeUrl } from '../services/geminiService';
 import Header from './Header';
 import AddBookmarkForm from './AddBookmarkForm';
 import BookmarkCard from './BookmarkCard';
+import BookmarkIcon from './BookmarkIcon';
 import BookmarkModal from './BookmarkModal';
 import ConfirmationModal from './ConfirmationModal';
 import InAppBrowser from './InAppBrowser';
+
+/**
+ * Provides initial layout settings based on screen width.
+ * Defaults to 1 column for mobile and 4 for desktop.
+ */
+const getInitialLayoutSettings = (): LayoutSettings => {
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+    return {
+        columns: isMobile ? 1 : 4,
+        viewMode: 'card',
+    };
+};
 
 /**
  * LocalApp is a self-contained version of the bookmark manager that
@@ -17,6 +29,7 @@ import InAppBrowser from './InAppBrowser';
  */
 export default function LocalApp(): React.ReactNode {
   const [bookmarks, setBookmarks] = useLocalStorage<Bookmark[]>('bookmarks', []);
+  const [layoutSettings, setLayoutSettings] = useLocalStorage<LayoutSettings>('layoutSettings', getInitialLayoutSettings());
   
   const {
     searchTerm,
@@ -28,7 +41,7 @@ export default function LocalApp(): React.ReactNode {
     lastBookmarkElementRef,
     visibleCount,
     debouncedSearchTerm
-  } = useBookmarkGrid(bookmarks);
+  } = useBookmarkGrid(bookmarks, layoutSettings.viewMode);
 
   const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null);
   const [deletingBookmark, setDeletingBookmark] = useState<Bookmark | null>(null);
@@ -47,14 +60,36 @@ export default function LocalApp(): React.ReactNode {
   }, [browsingUrl, editingBookmark, deletingBookmark]);
 
   const addBookmark = useCallback(async (url: string) => {
-    const analysis = await analyzeUrl(url);
-    const newBookmark: Bookmark = {
-      ...analysis,
-      id: new Date().toISOString() + Math.random().toString(36).substr(2, 9),
-      notes: '',
-      createdAt: new Date().toISOString(),
+    const pendingId = `pending-${Date.now()}`;
+    const pendingBookmark: Bookmark = {
+        id: pendingId,
+        url: url,
+        title: "Analyzing URL...",
+        description: "The AI is summarizing this page. This card will update automatically.",
+        imageUrl: `https://picsum.photos/seed/${encodeURIComponent(url)}/600/400`,
+        tags: [],
+        createdAt: new Date().toISOString(),
+        status: 'pending',
     };
-    setBookmarks(prev => [newBookmark, ...prev]);
+
+    setBookmarks(prev => [pendingBookmark, ...prev]);
+
+    try {
+        const analysis = await analyzeUrl(url);
+        const newBookmark: Bookmark = {
+          ...analysis,
+          id: new Date().toISOString() + Math.random().toString(36).substr(2, 9),
+          notes: '',
+          createdAt: new Date().toISOString(),
+        };
+        setBookmarks(prev => prev.map(b => (b.id === pendingId ? newBookmark : b)));
+    } catch (error) {
+        console.error("Failed to add bookmark:", error);
+        // Remove the pending bookmark on failure
+        setBookmarks(prev => prev.filter(b => b.id !== pendingId));
+        // Re-throw the error so the form can display it
+        throw error;
+    }
   }, [setBookmarks]);
 
   const updateBookmark = useCallback(async (updatedBookmark: Bookmark) => {
@@ -68,16 +103,14 @@ export default function LocalApp(): React.ReactNode {
   }, [setBookmarks]);
   
   const handleOpenBookmark = useCallback((bookmark: Bookmark) => {
+    if (bookmark.status === 'pending') return;
     const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
-    // On non-mobile devices, always open links in a new tab for a better desktop experience.
     if (!isMobile) {
       window.open(bookmark.url, '_blank', 'noopener,noreferrer');
       return;
     }
     
-    // On mobile devices, use the in-app browser if the site allows it.
-    // In local mode, openInIframe is not determined by a backend check, so we assume true unless explicitly set.
     if (bookmark.openInIframe === false) { 
       window.open(bookmark.url, '_blank', 'noopener,noreferrer');
     } else {
@@ -93,24 +126,41 @@ export default function LocalApp(): React.ReactNode {
           setSearchTerm={setSearchTerm}
           searchFilters={searchFilters}
           setSearchFilters={setSearchFilters}
+          layoutSettings={layoutSettings}
+          setLayoutSettings={setLayoutSettings}
         />
         
         <AddBookmarkForm onAddBookmark={addBookmark} />
 
         {visibleBookmarks.length > 0 ? (
-          <div className="columns-1 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-6 mt-8">
+          <div 
+             className="gap-6 mt-8"
+             style={{
+                columnCount: layoutSettings.columns,
+                columnGap: '1.5rem',
+             }}
+          >
             {visibleBookmarks.map((bookmark, index) => (
               <div 
                 ref={index === visibleBookmarks.length - 1 ? lastBookmarkElementRef : null} 
                 key={bookmark.id}
                 className="break-inside-avoid mb-6"
               >
-                <BookmarkCard 
-                  bookmark={bookmark}
-                  onEdit={() => setEditingBookmark(bookmark)}
-                  onDelete={() => setDeletingBookmark(bookmark)}
-                  onOpen={() => handleOpenBookmark(bookmark)}
-                />
+                {layoutSettings.viewMode === 'card' ? (
+                    <BookmarkCard 
+                      bookmark={bookmark}
+                      onEdit={() => setEditingBookmark(bookmark)}
+                      onDelete={() => setDeletingBookmark(bookmark)}
+                      onOpen={() => handleOpenBookmark(bookmark)}
+                    />
+                ) : (
+                    <BookmarkIcon
+                      bookmark={bookmark}
+                      onEdit={() => setEditingBookmark(bookmark)}
+                      onDelete={() => setDeletingBookmark(bookmark)}
+                      onOpen={() => handleOpenBookmark(bookmark)}
+                    />
+                )}
               </div>
             ))}
           </div>
