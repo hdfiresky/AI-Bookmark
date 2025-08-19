@@ -88,8 +88,14 @@ export default function App(): React.ReactNode {
     setDeletingBookmark(null);
   }, [setBookmarks]);
   
-  const handleOpenUrl = useCallback((url: string) => {
-    setBrowsingUrl(url);
+  const handleOpenBookmark = useCallback((bookmark: Bookmark) => {
+    // If the backend determines the site can't be iframed, open in a new tab.
+    // Defaults to iframe for existing bookmarks or if the flag is not present.
+    if (bookmark.openInIframe === false) {
+      window.open(bookmark.url, '_blank', 'noopener,noreferrer');
+    } else {
+      setBrowsingUrl(bookmark.url);
+    }
   }, []);
 
   return (
@@ -112,7 +118,7 @@ export default function App(): React.ReactNode {
                   bookmark={bookmark}
                   onEdit={() => setEditingBookmark(bookmark)}
                   onDelete={() => setDeletingBookmark(bookmark)}
-                  onOpenUrl={handleOpenUrl}
+                  onOpen={() => handleOpenBookmark(bookmark)}
                 />
               </div>
             ))}
@@ -139,7 +145,7 @@ export default function App(): React.ReactNode {
               setDeletingBookmark(editingBookmark);
               setEditingBookmark(null);
             }}
-            onOpenUrl={handleOpenUrl}
+            onOpen={() => handleOpenBookmark(editingBookmark)}
           />
         )}
 

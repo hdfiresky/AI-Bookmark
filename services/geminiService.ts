@@ -2,26 +2,20 @@ import { Bookmark } from '../types';
 import { GoogleGenAI, Type } from "@google/genai";
 
 // This function determines if the app should use the mock service.
-// It returns true if the API_KEY is not set, indicating a local development environment without a backend.
+// It returns true if the API_KEY is not set.
 const shouldUseMock = !process.env.API_KEY;
 
 const MOCK_DELAY = 1500;
 const createMockResponse = (url: string): Omit<Bookmark, 'id' | 'createdAt' | 'notes'> => ({
     url,
     title: `Mock Title for ${url}`,
-    description: "This is a mock description generated because the Gemini API key is not available, which means the backend is not running. The AI would normally generate a detailed summary here.",
+    description: "This is a mock description generated because the Gemini API key is not available. The AI would normally generate a detailed summary here.",
     imageUrl: `https://picsum.photos/seed/${Date.now()}/600/400`,
     tags: ['mock', 'sample-data', 'placeholder'],
+    openInIframe: true,
 });
 
-
-export const analyzeUrl = async (url: string): Promise<Omit<Bookmark, 'id' | 'createdAt' | 'notes'>> => {
-    // Use the mock service if the API_KEY is not available (i.e., no backend is expected to be running).
-    if (shouldUseMock) {
-        console.warn("API_KEY environment variable not set. Using a mock service. Please run the backend for full functionality or set API_KEY in project metadata.");
-        return new Promise(resolve => setTimeout(() => resolve(createMockResponse(url)), MOCK_DELAY));
-    }
-
+const callFrontendGemini = async (url: string): Promise<Omit<Bookmark, 'id' | 'createdAt' | 'notes'>> => {
     // =================================================================================
     // --- Frontend-Only Gemini API Implementation (INSECURE - for development) ---
     // This section calls the Gemini API directly from the browser.
@@ -72,53 +66,42 @@ export const analyzeUrl = async (url: string): Promise<Omit<Bookmark, 'id' | 'cr
             description: parsed.description,
             imageUrl: parsed.imageUrl,
             tags: parsed.tags,
+            openInIframe: true, // Default to true for frontend-only mode.
         };
-
-    } catch (error) {
-        console.error("Error calling Gemini API from frontend:", error);
-        return {
-            url,
-            title: `Error analyzing: ${url}`,
-            description: "Could not fetch metadata from Gemini API. Check your API key and network connection.",
-            imageUrl: `https://picsum.photos/seed/error/600/400`,
-            tags: ["error", "frontend-api"],
-        };
+    } catch (geminiError: any) {
+         console.error("Frontend Gemini call failed:", geminiError);
+         throw new Error(`Frontend analysis failed: ${geminiError.message}`);
     }
-    
-    /*
-    // =================================================================================
-    // --- Backend Integration (SECURE - for production) ---
-    // This version communicates with your secure backend instead of the Gemini API directly.
-    // See the guide.md file for instructions on setting up the backend server.
-    // To enable this, comment out the "Frontend-Only" section above and uncomment this one.
-    // =================================================================================
-    const BACKEND_API_URL = 'http://localhost:3001/api/analyze-url';
+};
+
+export const analyzeUrl = async (url: string): Promise<Omit<Bookmark, 'id' | 'createdAt' | 'notes'>> => {
+    // 1. If API key is missing entirely, use the mock service.
+    if (shouldUseMock) {
+        console.warn("API_KEY environment variable not set. Using a mock service. Please follow guide.md to set up the backend for full functionality.");
+        return new Promise(resolve => setTimeout(() => resolve(createMockResponse(url)), MOCK_DELAY));
+    }
+
+    // 2. Prioritize using the backend service, which is more secure and powerful.
+    const BACKEND_URL = 'http://localhost:3001/api/analyze-url';
     try {
-        const response = await fetch(BACKEND_API_URL, {
+        console.log(`Attempting to analyze URL via backend: ${url}`);
+        const response = await fetch(BACKEND_URL, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url }),
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ error: `Request failed with status ${response.status}` }));
-            throw new Error(errorData.error || `Request failed with status ${response.status}`);
-        }
-
         const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || `Backend error: ${response.statusText}`);
+        }
+        // The backend provides the `openInIframe` property.
         return data;
 
-    } catch (error) {
-        console.error("Error calling backend to analyze URL:", error);
-        return {
-            url,
-            title: `Error analyzing: ${url}`,
-            description: "Could not fetch metadata from backend. The backend server might be down or the URL is inaccessible.",
-            imageUrl: `https://picsum.photos/seed/error/600/400`,
-            tags: ["error", "backend"],
-        };
+    } catch (backendError: any) {
+        // 3. If the backend fails (e.g., not running), fall back to the insecure frontend Gemini call.
+        console.warn(`Backend request failed: ${backendError.message}. Falling back to insecure frontend Gemini API call.`);
+        return callFrontendGemini(url);
     }
-    */
 };

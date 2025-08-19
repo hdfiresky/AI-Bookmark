@@ -1,4 +1,3 @@
-
 export interface Bookmark {
   id: string;
   url: string;
@@ -8,6 +7,7 @@ export interface Bookmark {
   tags: string[];
   notes?: string;
   createdAt: string;
+  openInIframe?: boolean;
 }
 
 export interface SearchFilters {

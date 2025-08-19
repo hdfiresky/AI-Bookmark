@@ -1,4 +1,3 @@
-
 # Backend Setup Guide for AI Bookmark Manager
 
 ## Why You Need a Backend
@@ -132,17 +131,32 @@ app.post('/api/analyze-url', async (req, res) => {
     console.log(`Analyzing URL: ${url}`);
 
     try {
-        // 1. Scrape the webpage (this also acts as validation that the URL is reachable)
-        const { data: html } = await axios.get(url, {
+        // 1. Fetch the webpage and its headers
+        const axiosResponse = await axios.get(url, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
             },
             timeout: 10000,
         });
-        const $ = cheerio.load(html);
+        const html = axiosResponse.data;
+        const headers = axiosResponse.headers;
 
-        // 2. Extract and clean content
+        // 2. Check security headers to determine if it can be iframed
+        let openInIframe = true;
+        const xFrameOptions = headers['x-frame-options']?.toUpperCase() || '';
+        const csp = headers['content-security-policy'] || '';
+        
+        if (xFrameOptions === 'DENY' || xFrameOptions === 'SAMEORIGIN') {
+            openInIframe = false;
+        }
+
+        if (csp.includes("frame-ancestors 'none'") || csp.includes("frame-ancestors 'self'")) {
+            openInIframe = false;
+        }
+
+        // 3. Extract and clean content
+        const $ = cheerio.load(html);
         $('script, style, nav, footer, header, noscript, svg, aside, form, button, input').remove();
         const contentContainer = $('article').length ? $('article') : $('main').length ? $('main') : $('body');
         let bodyText = '';
@@ -154,7 +168,7 @@ app.post('/api/analyze-url', async (req, res) => {
         const MAX_TEXT_LENGTH = 8000;
         const truncatedText = bodyText.substring(0, MAX_TEXT_LENGTH);
 
-        // 3. Extract potential image URLs
+        // 4. Extract potential image URLs
         const imageUrls = new Set();
         const addUrl = (u) => {
             const absolute = toAbsoluteUrl(url, u);
@@ -168,7 +182,7 @@ app.post('/api/analyze-url', async (req, res) => {
         });
         const uniqueImageUrls = [...imageUrls].filter(Boolean).slice(0, 20);
 
-        // 4. Construct the prompt for Gemini
+        // 5. Construct the prompt for Gemini
         const prompt = `
             Analyze the following text content from the webpage at ${url}.
             Also, consider the list of image URLs found on the page.
@@ -187,7 +201,7 @@ app.post('/api/analyze-url', async (req, res) => {
             4. "imageUrl": The single best URL from the list that represents the page. If none are suitable, return an empty string.
         `;
 
-        // 5. Define the expected JSON schema
+        // 6. Define the expected JSON schema
         const schema = {
             type: Type.OBJECT,
             properties: {
@@ -199,14 +213,14 @@ app.post('/api/analyze-url', async (req, res) => {
             required: ['title', 'description', 'imageUrl', 'tags']
         };
 
-        // 6. Call the Gemini API
+        // 7. Call the Gemini API
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
             contents: prompt,
             config: { responseMimeType: "application/json", responseSchema: schema },
         });
 
-        // 7. Safely parse and send the final response
+        // 8. Safely parse and send the final response
         let parsed;
         try {
             parsed = JSON.parse(response.text);
@@ -221,6 +235,7 @@ app.post('/api/analyze-url', async (req, res) => {
             description: parsed.description,
             imageUrl: parsed.imageUrl || (uniqueImageUrls.length > 0 ? uniqueImageUrls[0] : `https://picsum.photos/seed/${encodeURIComponent(url)}/600/400`),
             tags: parsed.tags,
+            openInIframe,
         };
         
         res.json(result);

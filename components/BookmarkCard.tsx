@@ -7,10 +7,10 @@ interface BookmarkCardProps {
   bookmark: Bookmark;
   onEdit: () => void;
   onDelete: () => void;
-  onOpenUrl: (url: string) => void;
+  onOpen: () => void;
 }
 
-const BookmarkCard: React.FC<BookmarkCardProps> = ({ bookmark, onEdit, onDelete, onOpenUrl }) => {
+const BookmarkCard: React.FC<BookmarkCardProps> = ({ bookmark, onEdit, onDelete, onOpen }) => {
   const { url, title, description, imageUrl, tags, createdAt } = bookmark;
   
   const formattedDate = new Date(createdAt).toLocaleDateString('en-US', {
@@ -21,7 +21,7 @@ const BookmarkCard: React.FC<BookmarkCardProps> = ({ bookmark, onEdit, onDelete,
 
   return (
     <div className="bg-gray-850 rounded-lg shadow-lg overflow-hidden flex flex-col h-full transition-transform transform hover:-translate-y-1 hover:shadow-cyan-500/20">
-      <div onClick={() => onOpenUrl(url)} className="block cursor-pointer">
+      <div onClick={onOpen} className="block cursor-pointer">
         <img 
           src={imageUrl} 
           alt={title} 
@@ -30,7 +30,7 @@ const BookmarkCard: React.FC<BookmarkCardProps> = ({ bookmark, onEdit, onDelete,
         />
       </div>
       <div className="p-4 flex flex-col flex-grow">
-        <div onClick={() => onOpenUrl(url)} className="hover:text-cyan-400 transition-colors cursor-pointer">
+        <div onClick={onOpen} className="hover:text-cyan-400 transition-colors cursor-pointer">
           <h3 className="text-lg font-bold mb-2 line-clamp-2">{title}</h3>
         </div>
         <p className="text-gray-400 text-sm mb-4 line-clamp-3 flex-grow">{description}</p>

@@ -7,10 +7,10 @@ interface BookmarkModalProps {
   onClose: () => void;
   onSave: (bookmark: Bookmark) => void;
   onDelete: () => void;
-  onOpenUrl: (url: string) => void;
+  onOpen: () => void;
 }
 
-const BookmarkModal: React.FC<BookmarkModalProps> = ({ bookmark, onClose, onSave, onDelete, onOpenUrl }) => {
+const BookmarkModal: React.FC<BookmarkModalProps> = ({ bookmark, onClose, onSave, onDelete, onOpen }) => {
   const [notes, setNotes] = useState(bookmark.notes || '');
   const [tags, setTags] = useState(bookmark.tags.join(', '));
   const [currentTag, setCurrentTag] = useState('');
@@ -42,7 +42,7 @@ const BookmarkModal: React.FC<BookmarkModalProps> = ({ bookmark, onClose, onSave
         
         <div className="p-6 overflow-y-auto">
           <div className="mb-6">
-            <button onClick={() => onOpenUrl(bookmark.url)} className="flex items-center gap-2 text-cyan-400 hover:underline break-all text-left">
+            <button onClick={onOpen} className="flex items-center gap-2 text-cyan-400 hover:underline break-all text-left">
               <Icon name="link" className="w-5 h-5 flex-shrink-0" />
               <span>{bookmark.url}</span>
             </button>
