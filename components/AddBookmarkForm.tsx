@@ -1,11 +1,9 @@
 
 import React, { useState, useRef } from 'react';
-import { Bookmark } from '../types';
-import { analyzeUrl } from '../services/geminiService';
 import Icon from './Icon';
 
 interface AddBookmarkFormProps {
-  onAddBookmark: (bookmark: Bookmark) => void;
+  onAddBookmark: (url: string) => Promise<void>;
 }
 
 const AddBookmarkForm: React.FC<AddBookmarkFormProps> = ({ onAddBookmark }) => {
@@ -34,8 +32,6 @@ const AddBookmarkForm: React.FC<AddBookmarkFormProps> = ({ onAddBookmark }) => {
     e.preventDefault();
     if (!url.trim()) return;
 
-    // 1. Frontend URL validation for instant feedback
-    // This regex is permissive but ensures a basic structure like "domain.com"
     const urlPattern = /^(?:https?:\/\/)?(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*)$/;
     const trimmedUrl = url.trim();
 
@@ -52,18 +48,10 @@ const AddBookmarkForm: React.FC<AddBookmarkFormProps> = ({ onAddBookmark }) => {
     setIsLoading(true);
     setError(null);
     try {
-      const analysis = await analyzeUrl(validUrl);
-      const newBookmark: Bookmark = {
-        ...analysis,
-        url: validUrl, // Explicitly set the normalized URL to ensure data consistency
-        id: new Date().toISOString() + Math.random(),
-        createdAt: new Date().toISOString(),
-      };
-      onAddBookmark(newBookmark);
+      await onAddBookmark(validUrl);
       setUrl('');
     } catch (err: any) {
-      // The error message from the backend will now be more specific
-      setError(err.message || 'Failed to analyze URL. Please try again.');
+      setError(err.message || 'Failed to add bookmark. Please try again.');
       console.error(err);
     } finally {
       setIsLoading(false);

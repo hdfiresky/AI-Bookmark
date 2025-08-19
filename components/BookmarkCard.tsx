@@ -20,12 +20,12 @@ const BookmarkCard: React.FC<BookmarkCardProps> = ({ bookmark, onEdit, onDelete,
   });
 
   return (
-    <div className="bg-gray-850 rounded-lg shadow-lg overflow-hidden flex flex-col h-full transition-transform transform hover:-translate-y-1 hover:shadow-cyan-500/20">
+    <div className="bg-gray-850 rounded-lg shadow-lg overflow-hidden flex flex-col transition-transform transform hover:-translate-y-1 hover:shadow-cyan-500/20">
       <div onClick={onOpen} className="block cursor-pointer">
         <img 
           src={imageUrl} 
           alt={title} 
-          className="w-full h-48 object-cover" 
+          className="w-full h-auto" 
           onError={(e) => (e.currentTarget.src = 'https://picsum.photos/seed/fallback/600/400')}
         />
       </div>
